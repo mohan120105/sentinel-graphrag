@@ -35,15 +35,17 @@ Sentinel uses a three-layer retrieval architecture:
 
 This graph view demonstrates how Sentinel maps a central policy to specific customer segments and required compliance documents.
 
-![Neo4j Knowledge Graph](docs/assets/neo4j_graph_screenshot.png)
+
+<img width="1358" height="550" alt="graph" src="https://github.com/user-attachments/assets/e04ee437-52fb-4acd-b6ff-29744b5b3327" />
 
 ### Sentinel Co-Pilot Interface
 
 This UI demonstrates hybrid retrieval synthesizing policy rules and citing graph-backed evidence.
 
-![Streamlit Co-Pilot UI](docs/assets/streamlit_ui_screenshot.png)
 
-Note: Replace image paths above with actual screenshots if they are not yet present.
+<img width="1854" height="806" alt="image" src="https://github.com/user-attachments/assets/1884d260-aea7-44f5-86f2-eaaa7167635d" />
+<img width="1852" height="850" alt="image" src="https://github.com/user-attachments/assets/cff96d8d-20e3-48b2-aa9a-54c8dc696da3" />
+
 
 ## Repository Structure
 
@@ -139,6 +141,3 @@ RETURN p
 3. Commit changes with clear messages.
 4. Open a pull request.
 
-## License
-
-Add your preferred license (for example, MIT) in a `LICENSE` file.
