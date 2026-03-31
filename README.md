@@ -51,12 +51,16 @@ This UI demonstrates hybrid retrieval synthesizing policy rules and citing graph
 
 ```text
 .
+|-- api.py
 |-- app.py
 |-- init_graph.py
+|-- prompt_modifier.py
 |-- query_copilot.py
 |-- seed_database.py
 |-- requirements.txt
+|-- frontend/
 |-- img_data/
+|-- submission-docs/
 |-- v1_baseline_docs/
 ```
 
@@ -74,7 +78,7 @@ This UI demonstrates hybrid retrieval synthesizing policy rules and citing graph
 ### 2. Installation
 
 ```bash
-git clone https://github.com/yourusername/sentinel-graphrag.git
+git clone https://github.com/mohan120105/sentinel-graphrag.git
 cd sentinel-graphrag
 python -m venv venv
 ```
