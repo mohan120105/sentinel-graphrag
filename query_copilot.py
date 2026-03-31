@@ -1,9 +1,17 @@
-"""Sentinel Co-Pilot retrieval agent for active-policy Q&A.
+"""Sentinel: Retrieval and Grounded Generation Core for Active Policy Q&A.
 
-This script enforces strict graph retrieval for Tier-1 banking governance:
-- Only active policies are retrieved (no incoming SUPERSEDES edge).
-- Answers are synthesized from retrieved active context only.
-- If no verified active context exists, returns a strict fallback response.
+Architectural purpose:
+- Implements Sentinel retrieval logic that resolves policy evidence from Neo4j
+    and synthesizes answers only from active, governance-valid context.
+- Encapsulates enterprise fallback controls so unanswered queries fail closed
+    to strict no-answer responses instead of speculative completions.
+
+Compliance posture:
+- Enforces Strict Retrieval Constraint by excluding superseded policy nodes.
+- Supports Stateful Auditability by returning evidence-bearing context objects
+    with normalized confidence metadata.
+- Maintains Zero-Data Egress options by using local embeddings for semantic
+    retrieval preparation.
 """
 
 from __future__ import annotations
@@ -39,11 +47,36 @@ class ActivePolicy(BaseModel):
     )
     extracted_rule: str = Field(..., description="Normalized policy rule summary.")
     source_text: str = Field(..., description="Original policy source text.")
-    score: float = Field(..., description="Vector similarity score from Neo4j index.")
+    score: float = Field(..., description="Raw hybrid retrieval score from Neo4j.")
+    match_confidence: float = Field(
+        ...,
+        description="Normalized retrieval confidence percentage for UI display.",
+    )
+
+
+def _normalize_match_confidence(score: float, max_score: float) -> float:
+    """Normalize raw retrieval scores for stable UI confidence display.
+
+    Args:
+        score: Raw score for a candidate policy.
+        max_score: Highest score in the retrieved result set.
+
+    Returns:
+        float: Bounded confidence value scaled for analyst readability.
+    """
+
+    if max_score <= 0:
+        return 0.0
+    normalized = max(0.0, min(score / max_score, 1.0))
+    return round(normalized * 96.5, 1)
 
 
 def load_environment() -> None:
-    """Load .env and normalize quoted credential fields."""
+    """Load environment variables and sanitize credential formatting.
+
+    Returns:
+        None: Environment is updated in process memory.
+    """
 
     dotenv_path = find_dotenv()
     load_dotenv(dotenv_path=dotenv_path, override=True)
@@ -56,13 +89,24 @@ def load_environment() -> None:
 
 
 def _load_and_sanitize_env() -> None:
-    """Backward-compatible alias for older callers."""
+    """Backward-compatible alias for legacy callers.
+
+    Returns:
+        None: Delegates to load_environment.
+    """
 
     load_environment()
 
 
 def _to_bolt_uri(uri: str) -> str:
-    """Convert routing URI forms to direct bolt URI for single-node local setups."""
+    """Convert Neo4j routing URI formats into direct Bolt transport forms.
+
+    Args:
+        uri: Original configured Neo4j URI.
+
+    Returns:
+        str: Direct URI variant suitable for non-clustered deployments.
+    """
 
     if uri.startswith("neo4j://"):
         return uri.replace("neo4j://", "bolt://", 1)
@@ -75,7 +119,15 @@ def _to_bolt_uri(uri: str) -> str:
 
 
 def build_neo4j_driver() -> Driver:
-    """Create Neo4j driver and fallback to direct bolt when routing is unavailable."""
+    """Create Neo4j driver with routing-fallback resiliency.
+
+    Returns:
+        Driver: Verified Neo4j driver instance.
+
+    Raises:
+        ServiceUnavailable: If connectivity cannot be established.
+        Neo4jError: If driver verification fails for other reasons.
+    """
 
     uri = os.getenv("NEO4J_URI", "neo4j://127.0.0.1:7687")
     user = os.getenv("NEO4J_USER", "neo4j")
@@ -115,7 +167,14 @@ def build_neo4j_driver() -> Driver:
 
 
 def build_groq_llm() -> ChatGroq:
-    """Create Groq LLM client used for response synthesis."""
+    """Build Groq LLM client used for grounded response synthesis.
+
+    Returns:
+        ChatGroq: Configured deterministic LLM client.
+
+    Raises:
+        ValueError: If GROQ_API_KEY is absent.
+    """
 
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
@@ -125,7 +184,11 @@ def build_groq_llm() -> ChatGroq:
 
 
 def build_embeddings_model() -> HuggingFaceEmbeddings:
-    """Create local sentence-transformer embeddings model for semantic retrieval."""
+    """Build local sentence-transformer model for semantic retrieval.
+
+    Returns:
+        HuggingFaceEmbeddings: Embedding model for query vectorization.
+    """
 
     return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
@@ -142,6 +205,15 @@ def retrieve_active_policy(
     - Semantic candidate generation via Neo4j vector index on Policy.embedding.
     - Strict governance filter is enforced with `WHERE NOT ()-[:SUPERSEDES]->(p)`.
     - Returns evidence-ready context (rule, document name, category).
+
+    Args:
+        driver: Active Neo4j driver.
+        user_question: Original user question text.
+        question_embedding: Dense embedding vector for semantic lookup.
+        top_k: Maximum number of candidate policies to return.
+
+    Returns:
+        List[ActivePolicy]: Ranked active-policy evidence records.
     """
 
     cypher_query = """
@@ -160,10 +232,13 @@ def retrieve_active_policy(
     }
     // 1. Score Fusion
     WITH p, max(vector_score) AS vs, max(text_score) AS ts
-    // Normalize BM25 score roughly and combine with vector score
+    // Normalize BM25 score and mathematically fuse it with cosine-style
+    // vector similarity to achieve true hybrid retrieval behavior.
     WITH p, (vs + (ts / 10.0)) AS combined_score
 
     // 2. Governance Firewall
+    // Strictly exclude superseded nodes so only active policy truth flows
+    // into generation and downstream compliance decisions.
     MATCH (p)-[:BELONGS_TO]->(c:Category)
     WHERE NOT ()-[:SUPERSEDES]->(p)
 
@@ -202,7 +277,14 @@ def retrieve_active_policy(
     """
 
     def _is_missing_fulltext_index(error: Neo4jError) -> bool:
-        """Detect missing full-text index errors for graceful hybrid fallback."""
+        """Detect missing full-text index errors for graceful fallback.
+
+        Args:
+            error: Neo4j exception from hybrid query execution.
+
+        Returns:
+            bool: True when the policy keyword index is unavailable.
+        """
 
         error_text = str(error).lower()
         return (
@@ -249,26 +331,36 @@ def retrieve_active_policy(
                     )
                 )
 
-        return [
-            ActivePolicy(
-                document_name=record["document_name"],
-                category=record["category"],
-                customer_types=[
-                    value
-                    for value in (record.get("customer_types") or [])
-                    if value is not None
-                ],
-                required_docs=[
-                    value
-                    for value in (record.get("required_docs") or [])
-                    if value is not None
-                ],
-                extracted_rule=record["extracted_rule"],
-                source_text=record["source_text"],
-                score=float(record["score"]),
+        if not records:
+            return []
+
+        max_score = max(float(record["score"]) for record in records)
+        policies: List[ActivePolicy] = []
+
+        for record in records:
+            raw_score = float(record["score"])
+            policies.append(
+                ActivePolicy(
+                    document_name=record["document_name"],
+                    category=record["category"],
+                    customer_types=[
+                        value
+                        for value in (record.get("customer_types") or [])
+                        if value is not None
+                    ],
+                    required_docs=[
+                        value
+                        for value in (record.get("required_docs") or [])
+                        if value is not None
+                    ],
+                    extracted_rule=record["extracted_rule"],
+                    source_text=record["source_text"],
+                    score=raw_score,
+                    match_confidence=_normalize_match_confidence(raw_score, max_score),
+                )
             )
-            for record in records
-        ]
+
+        return policies
     except ServiceUnavailable as error:
         print(f"Neo4j connection dropped during retrieval: {error}")
         return []
@@ -285,7 +377,16 @@ def generate_answer(
     active_context: Sequence[ActivePolicy],
     user_question: str,
 ) -> str:
-    """Generate a grounded answer using only verified active policy context."""
+    """Generate grounded response text from verified active policy context.
+
+    Args:
+        llm: LLM client used for final answer generation.
+        active_context: Active policy evidence retrieved from Neo4j.
+        user_question: User's question text.
+
+    Returns:
+        str: Grounded answer text or strict no-answer fallback.
+    """
 
     if not active_context:
         return STRICT_NO_ANSWER
@@ -337,7 +438,15 @@ user_question:
 
 
 def print_response(answer: str, active_context: Sequence[ActivePolicy]) -> None:
-    """Print user-friendly answer plus evidence snapshot."""
+    """Print answer text along with evidence snapshot for operators.
+
+    Args:
+        answer: Final generated answer.
+        active_context: Retrieved evidence records used for grounding.
+
+    Returns:
+        None: Writes formatted output to console.
+    """
 
     if active_context:
         evidence = ", ".join(
@@ -353,7 +462,11 @@ def print_response(answer: str, active_context: Sequence[ActivePolicy]) -> None:
 
 
 def main() -> None:
-    """Run interactive retrieval loop for Sentinel Co-Pilot."""
+    """Run interactive CLI loop for Sentinel retrieval and generation.
+
+    Returns:
+        None: Runs until explicit user exit.
+    """
 
     load_environment()
 

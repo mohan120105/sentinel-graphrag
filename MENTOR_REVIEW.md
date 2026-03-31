@@ -188,3 +188,168 @@ streamlit run app.py
 - `app.py`
 - `requirements.txt`
 - `MENTOR_REVIEW.md` (this document)
+
+---
+
+## 11. Post-Review Updates Added After This Document Was First Written
+
+The project has advanced beyond the original Streamlit-only prototype. The following work was added after the initial mentor review note was created.
+
+### 11.1 FastAPI Service Layer Added (`api.py`)
+Implemented:
+- standalone FastAPI backend for Sentinel Co-Pilot
+- CORS-enabled API for frontend integration
+- `POST /chat` endpoint for policy-grounded question answering
+- `GET /sessions` endpoint to list stored chat sessions
+- lazy initialization of:
+  - Neo4j driver
+  - Groq LLM client
+  - embedding model
+
+### 11.2 Persistent Session Memory in Neo4j
+Implemented in `api.py`:
+- persistent conversation memory using:
+  - `(:Session {id})`
+  - `(:Message {role, content, timestamp})`
+- per-request retrieval of the last 4 conversation turns
+- ordered session replay using timestamps
+- write-back of user + assistant turns after every successful answer
+- graceful degradation when answer generation succeeds but message persistence fails
+
+### 11.3 True Hybrid GraphRAG Retrieval Upgrade (`query_copilot.py`)
+Retrieval was upgraded from vector-only retrieval to hybrid retrieval.
+
+Implemented:
+- hybrid candidate generation using:
+  - Neo4j vector index: `policy_embeddings`
+  - Neo4j full-text index: `policy_keywords`
+- score fusion of semantic similarity and BM25 keyword results
+- governance firewall retained:
+  - `WHERE NOT ()-[:SUPERSEDES]->(p)`
+- multi-hop retrieval expansion to include:
+  - `(:CustomerType)` via `APPLIES_TO`
+  - `(:DocumentRequirement)` via `REQUIRES`
+- evidence-rich active context returned as structured `ActivePolicy`
+- fallback to vector-only retrieval when full-text index is unavailable
+
+### 11.4 History-Aware Answer Generation
+Implemented in `api.py`:
+- conversation history injected into the final answer prompt
+- active policy context still remains the only authoritative evidence base
+- strict no-answer fallback preserved:
+  - `I cannot find a verified active policy for this in the current database.`
+- rate-limit aware fallback messaging for Groq API failures
+
+### 11.5 React + Vite Frontend Added (`frontend/`)
+Implemented:
+- separate React frontend for Sentinel Co-Pilot
+- Vite-based development setup
+- modern chat interface with:
+  - session sidebar
+  - new chat creation
+  - session switching
+  - live typing indicator
+  - markdown rendering for answers
+  - GFM table rendering for structured policy outputs
+  - collapsible citation panel with document/category/score
+- backend integration against FastAPI on `http://localhost:8000`
+
+UI stack added:
+- React 18
+- Vite
+- Tailwind CSS
+- `react-markdown`
+- `remark-gfm`
+- `lucide-react`
+
+### 11.6 Multimodal Universal Ingestion Strengthened (`app.py`)
+The Streamlit ingestion module was enhanced significantly.
+
+Implemented:
+- Gemini multimodal extraction for uploaded PDFs and images
+- stricter extraction prompt requiring table/slab data to be preserved inside `extracted_rule`
+- normalization layer to map common LLM key aliases into strict `GraphAction` schema fields
+- direct ingestion from extracted multimodal payload into Neo4j graph + vector storage
+- schema validation and improved error handling for JSON parsing, Gemini output, and Neo4j write failures
+
+### 11.7 Baseline Bulk Seeding Pipeline Added (`seed_database.py`)
+Implemented:
+- automated scan of `v1_baseline_docs/v1-base`
+- batch extraction of policy files (`.pdf`, `.png`) using Gemini multimodal input
+- ontology-constrained baseline ingestion
+- enforced `CREATE_NEW` baseline seeding behavior
+- configurable Gemini model selection from environment
+- basic rate-limit spacing between document ingestion calls
+
+### 11.8 Dependency Footprint Expanded (`requirements.txt`)
+Added backend/runtime dependencies for the newer stack:
+- `fastapi`
+- `uvicorn[standard]`
+- `google-genai`
+
+Existing graph / LLM / retrieval stack remains in use:
+- Neo4j
+- LangChain Core
+- LangChain Groq
+- LangChain HuggingFace
+- sentence-transformers
+- Pydantic
+- Streamlit
+
+### 11.9 Current Architecture After Updates
+Sentinel now supports two UI/application paths:
+
+1. Streamlit path
+   - dashboard / ingestion / retrieval prototype in one app
+
+2. FastAPI + React path
+   - FastAPI backend for GraphRAG orchestration
+   - React frontend for multi-session Co-Pilot experience
+
+Current end-to-end flow for the newer stack:
+1. User opens React Co-Pilot UI.
+2. Frontend calls FastAPI `/chat` with `session_id` and `user_question`.
+3. FastAPI loads recent session history from Neo4j.
+4. Query is embedded and sent through hybrid retrieval.
+5. Active-only governance filtering removes superseded policies.
+6. Multi-hop context includes customer type and required-document relations.
+7. Groq generates grounded answer from active context plus short conversation history.
+8. User and assistant messages are persisted back into Neo4j.
+9. Citations are returned to the frontend and rendered in the chat UI.
+
+### 11.10 Updated Run Modes
+Original Streamlit demo still works, but there is now an additional API + frontend mode.
+
+#### Streamlit mode
+```powershell
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+#### FastAPI + React mode
+```powershell
+# backend
+pip install -r requirements.txt
+uvicorn api:app --reload --host 0.0.0.0 --port 8000
+
+# frontend
+cd frontend
+npm install
+npm run dev
+```
+
+### 11.11 Updated Deliverables Since Initial Review
+Additional deliverables now present:
+- `api.py`
+- `seed_database.py`
+- `frontend/`
+  - `src/App.jsx`
+  - Vite + Tailwind setup files
+- baseline policy corpus in `v1_baseline_docs/`
+
+### 11.12 Summary of What Improved Since Initial Review
+- Sentinel evolved from a Streamlit PoC into a two-tier application with API + frontend separation.
+- Retrieval matured from strict vector-only search into hybrid GraphRAG with keyword fusion.
+- Chat now supports persistent Neo4j-backed session memory.
+- Ingestion now supports multimodal Gemini extraction and batch baseline seeding.
+- Frontend UX is significantly stronger for live demo and product-style presentation.
