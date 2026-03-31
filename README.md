@@ -43,8 +43,9 @@ This graph view demonstrates how Sentinel maps a central policy to specific cust
 This UI demonstrates hybrid retrieval synthesizing policy rules and citing graph-backed evidence.
 
 
-<img width="1854" height="806" alt="image" src="https://github.com/user-attachments/assets/1884d260-aea7-44f5-86f2-eaaa7167635d" />
-<img width="1852" height="850" alt="image" src="https://github.com/user-attachments/assets/cff96d8d-20e3-48b2-aa9a-54c8dc696da3" />
+<img width="1919" height="965" alt="image" src="https://github.com/user-attachments/assets/c1dd3b8c-062c-43cb-9d9b-ae5a407fd6f9" />
+<img width="1919" height="968" alt="image" src="https://github.com/user-attachments/assets/f6486a42-2833-42c7-9491-5e551eb55b1a" />
+<img width="1919" height="961" alt="image" src="https://github.com/user-attachments/assets/9618f454-0f40-4be8-8213-886aa25842ad" />
 
 
 ## Repository Structure
